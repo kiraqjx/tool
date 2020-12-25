@@ -34,20 +34,21 @@ func NewSLB(hosts []*Host, indexChanMax int, addIndexTime time.Duration) *SLB {
 	s.addIndexTime = addIndexTime
 	s.requestCount = 0
 	s.isRun = false
-	s.addIndexLock = make(chan int, 1)
+	s.addIndexLock = make(chan int)
 	s.addIndexStart = make(chan int, 1)
 	return s
 }
 
 func (s *SLB) AddHost(host *Host) {
 	s.lock.Lock()
-	defer s.lock.Unlock()
+	s.addIndexLock <- 1
+	defer func() {
+		s.addIndexStart <- 1
+		s.lock.Unlock()
+	}()
 	s.hostCount++
 	s.hosts = append(s.hosts, host)
-	subCount := len(s.IndexChan) * 3 / 4
-	s.addIndexLock <- 1
-	s.subSomeIndex(subCount)
-	s.addIndexStart <- 1
+	s.subSomeIndex(len(s.IndexChan))
 }
 
 func (s *SLB) RemoveHost(removeHost *Host) {
@@ -66,8 +67,11 @@ func (s *SLB) RemoveHost(removeHost *Host) {
 	s.subSomeIndex(len(s.IndexChan))
 }
 
-func (s *SLB) subSomeIndex(i int) {
-	for i := 0; i < i; i++ {
+func (s *SLB) subSomeIndex(count int) {
+	for i := 0; i < count; i++ {
+		if len(s.IndexChan) == 0 {
+			break
+		}
 		<-s.IndexChan
 	}
 }
@@ -77,7 +81,13 @@ func (s *SLB) Run(ctx context.Context) error {
 		return err
 	}
 	ticket := time.NewTicker(s.addIndexTime)
-	defer ticket.Stop()
+	defer func() {
+		ticket.Stop()
+		s.isRun = false
+		close(s.IndexChan)
+		close(s.addIndexLock)
+		close(s.addIndexStart)
+	}()
 	for {
 		select {
 		case <-ticket.C:
@@ -88,8 +98,6 @@ func (s *SLB) Run(ctx context.Context) error {
 				s.addIndex()
 			}
 		case <-ctx.Done():
-			s.isRun = false
-			close(s.IndexChan)
 			return nil
 		}
 	}
