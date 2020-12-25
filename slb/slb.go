@@ -3,52 +3,72 @@ package slb
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 )
 
 type SLB struct {
-	hosts 			[]*Host
-	Channel 		chan int
-	count 			int
-	max 			int
-	time 			time.Duration
-	lock 			sync.RWMutex
-	requestCount 	int
-	isRun			bool
+	hosts         []*Host
+	IndexChan     chan int
+	hostCount     int
+	indexChanMax  int
+	addIndexTime  time.Duration
+	lock          sync.RWMutex
+	requestCount  int
+	isRun         bool
+	addIndexLock  chan int
+	addIndexStart chan int
 }
 
 type Host struct {
 	Name string
-	Ip string
+	Ip   string
 }
 
-func NewSLB(hosts []*Host, max int, time time.Duration) *SLB {
+func NewSLB(hosts []*Host, indexChanMax int, addIndexTime time.Duration) *SLB {
 	s := &SLB{}
-	s.count = len(hosts)
+	s.hostCount = len(hosts)
 	s.hosts = hosts
-	s.max = max
-	s.Channel = make(chan int, s.max)
-	s.time = time
+	s.indexChanMax = indexChanMax
+	s.IndexChan = make(chan int, s.indexChanMax)
+	s.addIndexTime = addIndexTime
 	s.requestCount = 0
 	s.isRun = false
+	s.addIndexLock = make(chan int, 1)
+	s.addIndexStart = make(chan int, 1)
 	return s
 }
 
-func (s *SLB) Add(host *Host) {
+func (s *SLB) AddHost(host *Host) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.count++
+	s.hostCount++
 	s.hosts = append(s.hosts, host)
-	s.subSome()
+	subCount := len(s.IndexChan) * 3 / 4
+	s.addIndexLock <- 1
+	s.subSomeIndex(subCount)
+	s.addIndexStart <- 1
 }
 
-func (s *SLB) subSome() {
-	subCount := len(s.Channel) * 3 / 4
-	fmt.Println(subCount)
-	for i := 0; i < subCount; i++ {
-		<- s.Channel
+func (s *SLB) RemoveHost(removeHost *Host) {
+	s.lock.Lock()
+	s.addIndexLock <- 1
+	defer func() {
+		s.addIndexStart <- 1
+		s.lock.Unlock()
+	}()
+	s.hostCount--
+	for index, host := range s.hosts {
+		if host == removeHost {
+			s.hosts = append(s.hosts[:index], s.hosts[index+1:]...)
+		}
+	}
+	s.subSomeIndex(len(s.IndexChan))
+}
+
+func (s *SLB) subSomeIndex(i int) {
+	for i := 0; i < i; i++ {
+		<-s.IndexChan
 	}
 }
 
@@ -56,22 +76,30 @@ func (s *SLB) Run(ctx context.Context) error {
 	if err := s.isRunning(); err != nil {
 		return err
 	}
-	ticket := time.NewTicker(s.time)
+	ticket := time.NewTicker(s.addIndexTime)
 	defer ticket.Stop()
 	for {
 		select {
 		case <-ticket.C:
-			need := s.max - len(s.Channel)
-			for i := 0; i < need; i++ {
-				s.requestCount++
-				s.Channel <- s.requestCount % s.count
+			s.addIndex()
+		case <-s.addIndexLock:
+			select {
+			case <-s.addIndexStart:
+				s.addIndex()
 			}
-			continue
-		case <- ctx.Done():
+		case <-ctx.Done():
 			s.isRun = false
-			close(s.Channel)
+			close(s.IndexChan)
 			return nil
 		}
+	}
+}
+
+func (s *SLB) addIndex() {
+	need := s.indexChanMax - len(s.IndexChan)
+	for i := 0; i < need; i++ {
+		s.requestCount++
+		s.IndexChan <- s.requestCount % s.hostCount
 	}
 }
 
@@ -87,7 +115,7 @@ func (s *SLB) isRunning() error {
 }
 
 func (s *SLB) GetHost(i int) (*Host, error) {
-	if i < s.count {
+	if i < s.hostCount {
 		return s.hosts[i], nil
 	}
 	return nil, errors.New("error: no found")

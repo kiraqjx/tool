@@ -14,19 +14,20 @@ func TestSLB(t *testing.T) {
 	slb := NewSLB(hosts, 10, 2 * time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	go slb.Run(ctx)
-	go func(slb *SLB) {
+	go func(slb *SLB, host *Host) {
 		time.Sleep(3 * time.Second)
 		host3 := &Host{Name: "host3.com", Ip: "192.168.1.3"}
-		slb.Add(host3)
-	}(slb)
+		slb.AddHost(host3)
+		slb.RemoveHost(host1)
+	}(slb, host1)
 	for i := 0; i < 5; i++ {
-		index := <- slb.Channel
+		index := <- slb.IndexChan
 		fmt.Println(slb.GetHost(index))
 	}
 	time.Sleep(1 * time.Second)
 	fmt.Println("==========================")
 	for i := 0; i < 15; i++ {
-		index := <-slb.Channel
+		index := <-slb.IndexChan
 		fmt.Println(slb.GetHost(index))
 	}
 	cancel()
