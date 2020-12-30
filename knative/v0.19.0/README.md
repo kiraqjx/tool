@@ -2,7 +2,7 @@
 
 ## install
 ```shell script
-git clone https://github.com/kiraqjx/dockerimages.git
+git clone https://github.com/kiraqjx/tool.git
 git checkout master
 cd knative/v0.19.0
 
