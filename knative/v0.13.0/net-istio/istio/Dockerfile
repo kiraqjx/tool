@@ -1,0 +1,1 @@
+FROM gcr.io/knative-releases/knative.dev/serving/cmd/networking/istio@sha256:0b8759bbb02461728546672d6e4a59fa0fdfc9bf31730ce41d5363d9b08b590f

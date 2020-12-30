@@ -11,5 +11,5 @@ kubectl apply --filename https://github.com/knative/serving/releases/download/v0
 kubectl apply --filename serving-core/serving-core.yaml
 
 # install istio net
-kubectl apply --filename net-istio/release.yaml
+kubectl apply --filename net-istio/serving-istio.yaml
 ```
